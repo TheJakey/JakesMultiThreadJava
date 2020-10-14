@@ -2,20 +2,20 @@ package com.company;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
     private static final String GREEN = "GREEN";
+    private static final String ORANGE = "ORANGE";
     private static final String RED = "RED";
-    private static final MyColor currentColor = new MyColor(RED);
+    private static final CurrentColor currentColor = new CurrentColor(RED);
 
-    private static Integer counter = 0;
+    private static boolean stop = false;
 
-    static class MyColor {
+    static class CurrentColor {
 
         private String color;
 
-        public MyColor(String color){
+        public CurrentColor(String color){
             this.color = color;
         }
 
@@ -31,7 +31,7 @@ public class Main {
 
         @Override
         public void run() {
-            while (counter < 9) {
+            while (!stop) {
                 synchronized (currentColor) {
                     while (!myColor.equals(currentColor.color)) {
                         try {
@@ -44,8 +44,11 @@ public class Main {
                     System.out.println(myColor);
 //                    System.out.println("Counter value: " + counter);
 
-                    currentColor.color = myColor.equals(RED) ? GREEN : RED;
-                    counter++;
+                    switch (myColor) {
+                        case RED: currentColor.color = ORANGE; break;
+                        case ORANGE: currentColor.color = GREEN; break;
+                        case GREEN: currentColor.color = RED; break;
+                    }
 
                     currentColor.notifyAll();
                 }
@@ -60,6 +63,7 @@ public class Main {
         List<Thread> threads = new ArrayList<>();
 
         threads.add(new MyThread(RED));
+        threads.add(new MyThread(ORANGE));
         threads.add(new MyThread(GREEN));
 
         startThreads(threads);
