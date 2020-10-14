@@ -2,11 +2,14 @@ package com.company;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
     private static final String GREEN = "GREEN";
     private static final String RED = "RED";
     private static final MyColor currentColor = new MyColor(RED);
+
+    private static Integer counter = 0;
 
     static class MyColor {
 
@@ -21,7 +24,6 @@ public class Main {
     static class MyThread extends Thread {
 
         private final String myColor;
-        private boolean stop = false;
 
         public MyThread(String color) {
             myColor = color;
@@ -29,7 +31,7 @@ public class Main {
 
         @Override
         public void run() {
-            while (!stop) {
+            while (counter < 9) {
                 synchronized (currentColor) {
                     while (!myColor.equals(currentColor.color)) {
                         try {
@@ -40,14 +42,16 @@ public class Main {
                     }
 
                     System.out.println(myColor);
+//                    System.out.println("Counter value: " + counter);
 
                     currentColor.color = myColor.equals(RED) ? GREEN : RED;
+                    counter++;
 
                     currentColor.notifyAll();
                 }
-
             }
         }
+
     }
 
     public static void main(String[] args) throws InterruptedException {
@@ -71,7 +75,6 @@ public class Main {
         for (Thread thread : threads) {
             thread.start();
         }
-
     }
 
 }
