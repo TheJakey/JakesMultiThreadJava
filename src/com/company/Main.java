@@ -7,33 +7,35 @@ public class Main {
     private static final String GREEN = "GREEN";
     private static final String ORANGE = "ORANGE";
     private static final String RED = "RED";
-    private static final CurrentColor currentColor = new CurrentColor(RED);
+    private static final CurrentColor currentColor = new CurrentColor(0);
 
     private static boolean stop = false;
 
     static class CurrentColor {
 
-        private String color;
+        private Integer currentId;
 
-        public CurrentColor(String color){
-            this.color = color;
+        public CurrentColor(Integer currentId){
+            this.currentId = currentId;
         }
 
     }
 
     static class MyThread extends Thread {
 
-        private final String myColor;
+        private final Integer myId;
+        private final Integer threadsCount;
 
-        public MyThread(String color) {
-            myColor = color;
+        public MyThread(Integer id, Integer threadsCount) {
+            this.myId = id;
+            this.threadsCount = threadsCount;
         }
 
         @Override
         public void run() {
             while (!stop) {
                 synchronized (currentColor) {
-                    while (!myColor.equals(currentColor.color)) {
+                    while (!myId.equals(currentColor.currentId)) {
                         try {
                             currentColor.wait();
                         } catch (InterruptedException e) {
@@ -41,14 +43,13 @@ public class Main {
                         }
                     }
 
-                    System.out.println(myColor);
+                    System.out.println(myId + 1);
 //                    System.out.println("Counter value: " + counter);
 
-                    switch (myColor) {
-                        case RED: currentColor.color = ORANGE; break;
-                        case ORANGE: currentColor.color = GREEN; break;
-                        case GREEN: currentColor.color = RED; break;
-                    }
+                    if (myId < threadsCount - 1)
+                        currentColor.currentId++;
+                    else
+                        currentColor.currentId = 0;
 
                     currentColor.notifyAll();
                 }
@@ -59,12 +60,13 @@ public class Main {
 
     public static void main(String[] args) throws InterruptedException {
         System.out.println("Hi Jake");
+        int threadCount = 6;
 
         List<Thread> threads = new ArrayList<>();
 
-        threads.add(new MyThread(RED));
-        threads.add(new MyThread(ORANGE));
-        threads.add(new MyThread(GREEN));
+        for (int i = 0; i < threadCount; i++) {
+            threads.add(new MyThread(i, threadCount));
+        }
 
         startThreads(threads);
 
