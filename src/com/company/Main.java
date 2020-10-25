@@ -2,71 +2,82 @@ package com.company;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 
 public class Main {
     private static final String GREEN = "GREEN";
     private static final String ORANGE = "ORANGE";
     private static final String RED = "RED";
-    private static final CurrentColor currentColor = new CurrentColor(0);
+    private static final CurrentColor currentColor = new CurrentColor(RED);
 
     private static boolean stop = false;
 
+    private static final Semaphore mutex = new Semaphore(1);
+
+
     static class CurrentColor {
 
-        private Integer currentId;
+        private String color;
 
-        public CurrentColor(Integer currentId){
-            this.currentId = currentId;
+        public CurrentColor(String color){
+            this.color = color;
         }
 
     }
 
     static class MyThread extends Thread {
 
-        private final Integer myId;
-        private final Integer threadsCount;
+        private final String myColor;
 
-        public MyThread(Integer id, Integer threadsCount) {
-            this.myId = id;
-            this.threadsCount = threadsCount;
+        public MyThread(String color) {
+            myColor = color;
         }
 
         @Override
         public void run() {
             while (!stop) {
-                synchronized (currentColor) {
-                    while (!myId.equals(currentColor.currentId)) {
-                        try {
-                            currentColor.wait();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
+//                    System.out.println("Counter value: " + counter);
+                try {
+//                    System.out.println("Asking for mutex: " + myColor);
+                    mutex.acquire();
+
+
+                    switch (myColor) {
+                        case RED: currentColor.color = GREEN; break;
+//                        case ORANGE: currentColor.color = GREEN; break;
+                        case GREEN: currentColor.color = RED; break;
                     }
 
-                    System.out.println(myId + 1);
-//                    System.out.println("Counter value: " + counter);
 
-                    if (myId < threadsCount - 1)
-                        currentColor.currentId++;
-                    else
-                        currentColor.currentId = 0;
 
-                    currentColor.notifyAll();
                 }
+                catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                finally {
+
+                    mutex.release();
+                }
+                System.out.println(myColor);
+
+                try {
+                    sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+
+
             }
         }
 
     }
 
     public static void main(String[] args) throws InterruptedException {
-        System.out.println("Hi Jake");
-        int threadCount = 6;
-
         List<Thread> threads = new ArrayList<>();
 
-        for (int i = 0; i < threadCount; i++) {
-            threads.add(new MyThread(i, threadCount));
-        }
+        threads.add(new MyThread(GREEN));
+//        threads.add(new MyThread(ORANGE));
+        threads.add(new MyThread(RED));
 
         startThreads(threads);
 
@@ -74,7 +85,6 @@ public class Main {
             thread.join();
         }
 
-        System.out.println("I'm done. Bye.");
     }
 
     private static void startThreads(List<Thread> threads) {
