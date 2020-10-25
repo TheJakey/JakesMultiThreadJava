@@ -2,95 +2,89 @@ package com.company;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Semaphore;
 
 public class Main {
-    private static final String GREEN = "GREEN";
-    private static final String ORANGE = "ORANGE";
-    private static final String RED = "RED";
-    private static final CurrentColor currentColor = new CurrentColor(RED);
+    private static final Current CURRENT = new Current(0, 1);
 
     private static boolean stop = false;
 
-    private static final Semaphore mutex = new Semaphore(1);
 
+    static class Current {
 
-    static class CurrentColor {
+        private Integer currentId;
+        public int counter;
 
-        private String color;
-
-        public CurrentColor(String color){
-            this.color = color;
+        public Current(Integer currentId, int counter){
+            this.currentId = currentId;
+            this.counter = counter;
         }
 
     }
 
     static class MyThread extends Thread {
 
-        private final String myColor;
+        private final Integer myId;
+        private Integer myCounter;
 
-        public MyThread(String color) {
-            myColor = color;
+        public MyThread(Integer id, Integer myCounter) {
+            this.myId = id;
+            this.myCounter = myCounter;
         }
 
         @Override
         public void run() {
-            while (!stop) {
-//                    System.out.println("Counter value: " + counter);
-                try {
-//                    System.out.println("Asking for mutex: " + myColor);
-                    mutex.acquire();
 
+            synchronized (CURRENT) {
+                while (!stop) {
 
-                    switch (myColor) {
-                        case RED: currentColor.color = GREEN; break;
-//                        case ORANGE: currentColor.color = GREEN; break;
-                        case GREEN: currentColor.color = RED; break;
+                    while (myCounter == 0) {
+                        try {
+                            CURRENT.wait();
+                            myCounter = 10;
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                     }
 
+                    if (CURRENT.counter < 31)
+                        System.out.println("Som vlakvno: " + myId + "   Counter je: " + CURRENT.counter);
+                    else
+                        stop = true;
 
+                    CURRENT.counter++;
+                    myCounter--;
 
+                    if (myCounter < 1) {
+                        CURRENT.notifyAll();
+                    }
                 }
-                catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                finally {
-
-                    mutex.release();
-                }
-                System.out.println(myColor);
-
-                try {
-                    sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-
-
             }
         }
 
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        List<Thread> threads = new ArrayList<>();
 
-        threads.add(new MyThread(GREEN));
-//        threads.add(new MyThread(ORANGE));
-        threads.add(new MyThread(RED));
+        public static void main(String[] args) throws InterruptedException {
+            System.out.println("Hi Jake");
 
-        startThreads(threads);
+            List<Thread> threads = new ArrayList<>();
 
-        for (Thread thread : threads) {
-            thread.join();
+            threads.add(new MyThread(0, 0));
+            threads.add(new MyThread(1, 10));
+
+            startThreads(threads);
+
+            for (Thread thread : threads) {
+                thread.join();
+            }
+
+            System.out.println("I'm done. Bye.");
         }
 
-    }
-
-    private static void startThreads(List<Thread> threads) {
-        for (Thread thread : threads) {
-            thread.start();
+        private static void startThreads(List<Thread> threads) {
+            for (Thread thread : threads) {
+                thread.start();
+            }
         }
-    }
 
 }
