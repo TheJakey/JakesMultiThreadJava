@@ -2,61 +2,49 @@ package com.company;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
-    private static final Current CURRENT = new Current(0, 1);
-
     private static boolean stop = false;
 
+    private static final ReentrantLock mutex = new ReentrantLock();
+    private static final int THREADS_COUNT = 10;
 
     static class Current {
 
-        private Integer currentId;
-        public int counter;
-
-        public Current(Integer currentId, int counter){
-            this.currentId = currentId;
-            this.counter = counter;
-        }
+        public static int counter;
 
     }
 
     static class MyThread extends Thread {
 
         private final Integer myId;
-        private Integer myCounter;
 
-        public MyThread(Integer id, Integer myCounter) {
+        public MyThread(Integer id) {
             this.myId = id;
-            this.myCounter = myCounter;
         }
 
         @Override
         public void run() {
 
-            synchronized (CURRENT) {
-                while (!stop) {
+            while (!stop) {
+                mutex.lock();
 
-                    while (myCounter == 0) {
-                        try {
-                            CURRENT.wait();
-                            myCounter = 10;
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                    }
+                if (!stop) {
+                    Current.counter++;
+                    System.out.println("New value: " + Current.counter + "\nMyId: " + myId);
+                    System.out.println();
+                }
 
-                    if (CURRENT.counter < 31)
-                        System.out.println("Som vlakvno: " + myId + "   Counter je: " + CURRENT.counter);
-                    else
-                        stop = true;
+                mutex.unlock();
 
-                    CURRENT.counter++;
-                    myCounter--;
+                if (myId == THREADS_COUNT)
+                    stop = true;
 
-                    if (myCounter < 1) {
-                        CURRENT.notifyAll();
-                    }
+                try {
+                    sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
             }
         }
@@ -64,27 +52,23 @@ public class Main {
     }
 
 
-        public static void main(String[] args) throws InterruptedException {
-            System.out.println("Hi Jake");
+    public static void main(String[] args) throws InterruptedException {
+        List<Thread> threads = new ArrayList<>();
 
-            List<Thread> threads = new ArrayList<>();
+        for (int i = 1; i <= THREADS_COUNT; i++)
+            threads.add(new MyThread(i));
 
-            threads.add(new MyThread(0, 0));
-            threads.add(new MyThread(1, 10));
+        startThreads(threads);
 
-            startThreads(threads);
-
-            for (Thread thread : threads) {
-                thread.join();
-            }
-
-            System.out.println("I'm done. Bye.");
+        for (Thread thread : threads) {
+            thread.join();
         }
+    }
 
-        private static void startThreads(List<Thread> threads) {
-            for (Thread thread : threads) {
-                thread.start();
-            }
+    private static void startThreads(List<Thread> threads) {
+        for (Thread thread : threads) {
+            thread.start();
         }
+    }
 
 }
