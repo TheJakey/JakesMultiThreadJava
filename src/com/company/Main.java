@@ -3,78 +3,62 @@ package com.company;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
 * Implementation of Producer and Consumer - Letter generator
  **/
 public class Main {
+
     private static final Current myCurrent = new Current();
 
-    private static final Lock lock = new ReentrantLock();
-    private static final Condition isEmpty = lock.newCondition();
-    private static final Condition isFull = lock.newCondition();
+    private static final ReentrantLock mutex = new ReentrantLock();
+    private static final Condition collectorsCondition = mutex.newCondition();
+    private static final Condition huntersCondition = mutex.newCondition();
+    private static int collectorsCount = 0;
+    private static int huntersCount = 0;
+
+    private static final ReentrantLock hunterGiftMutex = new ReentrantLock();
+    private static final ReentrantLock collectorGiftMutex = new ReentrantLock();
+    private static int hunterGiftsCount = 0;
+    private static int collectorGiftsCount = 0;
 
     private static boolean stop = false;
 
-    private static final ReentrantLock inputCounterMutex = new ReentrantLock();
-    private static final ReentrantLock outputCounterMutex = new ReentrantLock();
-    private static int inputCount = 0;
-    private static int outputCount = 0;
-
-    public static char generate_letter() {
-        inputCounterMutex.lock();
-        inputCount++;
-        inputCounterMutex.unlock();
-
-        sleep(1000);
-        return 'A';
-    }
-
-    public static void test_letter(char letter) {
-        outputCounterMutex.lock();
-        outputCount++;
-        outputCounterMutex.unlock();
-
-        sleep(2000);
-    }
 
     public static void main(String[] args) {
         int i;
 
-        List<Thread> generators = new ArrayList<>();
-        List<Thread> testers = new ArrayList<>();
+        List<Thread> hunters = new ArrayList<>();
+        List<Thread> collectors = new ArrayList<>();
 
-        for (i = 0; i < 4; i++) generators.add(new GeneratorThread(i));
-        for (i = 0; i < 10; i++) testers.add(new TesterThread(i));
+        for (i = 0; i < 6; i++) hunters.add(new HunterThread(i));
+        for (i = 0; i < 12; i++) collectors.add(new CollectorThread(i));
 
-        startThreads(generators);
-        startThreads(testers);
+        startThreads(hunters);
+        startThreads(collectors);
 
         sleep(30000);
+        stop = true;
 
         // end the misery of threads and finish them all
-        lock.lock();
-
-        stop = true;
-        isEmpty.signalAll();
-        isFull.signalAll();
-
-        lock.unlock();
+        mutex.lock();
+        collectorsCondition.signalAll();
+        huntersCondition.signalAll();
+        mutex.unlock();
 
         try {
-            for (Thread thread : generators) thread.join();
-            for (Thread thread : testers) thread.join();
+            for (Thread thread : hunters) thread.join();
+            for (Thread thread : collectors) thread.join();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
 
-        System.out.println("Input count: " + inputCount);
-        System.out.println("Output count: " + outputCount);
+        System.out.println("Hunter gited: " + hunterGiftsCount);
+        System.out.println("Collector gifted: " + collectorGiftsCount);
     }
 
-    private static void sleep(int miliseconds) {
+    public static void sleep(int miliseconds) {
         try {
             Thread.sleep(miliseconds);
         } catch (InterruptedException e) {
@@ -86,127 +70,122 @@ public class Main {
             thread.start();
         }
     }
-    private static void waitForSignal(Condition isFull) {
+    private static void waitForSignal(Condition queue) {
         try {
-            isFull.await();
+            queue.await();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
     }
 
     static class Current {
-        public char[] table = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
-        public int input_position = 0;
-        public int output_position = 0;
-        public int onTableCount = 0;
+        public final List<Thread> queue = new ArrayList<>();
+        public int inside = 0;
     }
 
-    static class GeneratorThread extends Thread {
+    static class HunterThread extends Thread {
 
         private final Integer myId;
 
-        public GeneratorThread(Integer id) {
+        public HunterThread(Integer id) {
             this.myId = id;
+        }
+
+        public void doAction() {
+            Main.sleep(6000);
+        }
+
+        public void giveGift() {
+            Main.sleep(2000);
+            hunterGiftMutex.lock();
+            hunterGiftsCount++;
+            hunterGiftMutex.unlock();
         }
 
         @Override
         public void run() {
             // till not stopped
             while (!stop) {
+                doAction();
 
-                // generate letter
-                char letter = generate_letter();
 
-                // lock entrence
-                try {
-                    lock.lock();
-                    // wait till there is a space on the table while you still can
-                    while (myCurrent.onTableCount == 10 && !stop)
-                        waitForSignal(isEmpty);
-                    // if you cant, just break cycle
-                    if (stop)
-                        break;
-
-                    // put it on the table
-                    myCurrent.table[myCurrent.input_position] = letter;
-                    myCurrent.input_position = (myCurrent.input_position + 1) % 10;
-
-                    // add new letter to total count
-                    myCurrent.onTableCount++;
-
-                    // signal that table is not empty anymore
-                    isFull.signal();
+                mutex.lock();
+                while ((collectorsCount != 0 || huntersCount == 2) && !stop) {
+                    waitForSignal(collectorsCondition);
                 }
-                finally {
-                    // unlock entrence
-                    lock.unlock();
+                if (stop) {
+                    mutex.unlock();
+                    break;
                 }
+                huntersCount++;
+                System.out.println("Hunter entering \nHunterID: " + myId + "\nNumber of hunters in with me: " + huntersCount);
+                System.out.println();
+                mutex.unlock();
+
+
+                giveGift();
+
+
+                mutex.lock();
+                huntersCount--;
+
+                huntersCondition.signalAll();
+                mutex.unlock();
             }
-//            while (!stop) {
-//                mutex.lock();
-//
-//                if (!stop) {
-//                    myCurrent.counter++;
-//                    System.out.println("New value: " + myCurrent.counter + "\nMyId: " + myId);
-//                    System.out.println();
-//                }
-//
-//                mutex.unlock();
-//
-//                if (myId == THREADS_COUNT)
-//                    stop = true;
-//
-//                try {
-//                    sleep(1000);
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
-//            }
         }
 
     }
 
-    static class TesterThread extends Thread {
+    static class CollectorThread extends Thread {
 
         private final Integer myId;
 
-        public TesterThread(Integer id) {
+        public CollectorThread(Integer id) {
             this.myId = id;
+        }
+
+        public void doAction() {
+            Main.sleep(4000);
+        }
+
+        public void giveGift() {
+            Main.sleep(1000);
+            collectorGiftMutex.lock();
+            collectorGiftsCount++;
+            collectorGiftMutex.unlock();
         }
 
         @Override
         public void run() {
             // till not stopped
             while (!stop) {
+                doAction();
 
-                char letter = ' ';
 
-                try {
-                    lock.lock();
-
-                    while (myCurrent.onTableCount == 0 && !stop) {
-                        waitForSignal(isFull);
-                    }
-                    if (stop)
-                        break;
-
-                    // take the letter of the table
-                    letter = myCurrent.table[myCurrent.output_position];
-                    myCurrent.output_position = (myCurrent.output_position + 1) % 10;
-
-                    myCurrent.onTableCount--;
-
-                    // signal that letter was taken from the table
-                    isEmpty.signal();
+                mutex.lock();
+                while ((huntersCount != 0 || collectorsCount == 4) && !stop) {
+                    waitForSignal(huntersCondition);
                 }
-                finally {
-                    lock.unlock();
+                if (stop) {
+                    mutex.unlock();
+                    break;
                 }
+                collectorsCount++;
+                System.out.println("Collector entering \nCollectorID: " + myId + "\nNumber of Collector in with me: " + collectorsCount);
+                System.out.println();
+                mutex.unlock();
 
-                // test the letter
-                test_letter(letter);
+                giveGift();
+
+
+                mutex.lock();
+                collectorsCount--;
+
+                collectorsCondition.signalAll();
+                mutex.unlock();
             }
         }
 
     }
+
 }
