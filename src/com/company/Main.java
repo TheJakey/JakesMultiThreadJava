@@ -128,6 +128,7 @@ public class Main {
             synchronized (myCurrent) {
 //                System.out.println("MyID: " + myId + "   -- Voted. Submiting vote.");
                 myCurrent.currentlyVoting--;
+                myCurrent.notify();
             }
 
             mutex.lock();
