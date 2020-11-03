@@ -5,18 +5,18 @@ import java.util.List;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-/**
-* Implementation of Producer and Consumer - Letter generator
- **/
 public class Main {
 
     private static final Current myCurrent = new Current();
 
     private static final ReentrantLock mutex = new ReentrantLock();
-    private static final ReentrantLock voteBoxMutex = new ReentrantLock();
-    private static final ReentrantLock votedMutex = new ReentrantLock();
+    private static final Condition waitingCondition = mutex.newCondition();
+    private static boolean inBarrier = false;
 
-    private static int votedCount = 0;
+    private static final ReentrantLock usedBucketsMutex = new ReentrantLock();
+    private static int usedBucketsCount = 0;
+    private volatile static int currentlyWaiting = 0;
+
 
     private static boolean stop = false;
 
@@ -24,28 +24,32 @@ public class Main {
     public static void main(String[] args) {
         int i;
 
-        List<Thread> voters = new ArrayList<>();
+        List<Thread> painters = new ArrayList<>();
 
-        for (i = 0; i < 100; i++) voters.add(new VoterThread(i));
+        for (i = 0; i < 10; i++) painters.add(new PainterThread(i));
 
-        DisplayThread displayThread = new DisplayThread();
-        displayThread.start();
-
-        for (Thread voter : voters) {
-            voter.start();
-            sleep(1000);
+        for (Thread thread : painters) {
+            thread.start();
         }
 
+        sleep(30_000);
+        stop = true;
+
+        mutex.lock();
+        waitingCondition.signalAll();
+        mutex.unlock();
+
         try {
-            for (Thread thread : voters) thread.join();
-
-            // end also display thread
-            stop = true;
-            displayThread.join();
-
+            for (Thread thread : painters) {
+                System.out.println("Painter " + ((PainterThread)thread).getMyId()
+                                   + " used: " + ((PainterThread)thread).getMyUsedBuckets());
+                thread.join();
+            }
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
+
+        System.out.println("All used: " + usedBucketsCount);
     }
 
     public static void sleep(int miliseconds) {
@@ -76,67 +80,103 @@ public class Main {
     }
 
     static class Current {
-        public int currentlyVoting = 0;
+        public int leftForBreak = 0;
+//        public int currentlyWaiting = 0;
+        public boolean needToWaitOthers = true;
     }
 
-    static class DisplayThread extends Thread {
-        @Override
-        public void run() {
-            while (!stop) {
-                votedMutex.lock();
-                System.out.println("Voted: " + votedCount);
-                votedMutex.unlock();
-
-                Main.sleep(5000);
-            }
-        }
-    }
-
-    static class VoterThread extends Thread {
+    static class PainterThread extends Thread {
 
         private final Integer myId;
+        private Integer myUsedBuckets = 0;
+        private Integer bucketsSinceLastBreak = 0;
 
-        public VoterThread(Integer id) {
+        public PainterThread(Integer id) {
             this.myId = id;
         }
 
-        public void vote() {
-            Main.sleep(2000);
+        public void paint() {
+            Main.sleep(2_000);
         }
 
-        public void submitVote() {
-            Main.sleep(1000);
-            votedMutex.lock();
-            votedCount++;
-            votedMutex.unlock();
+        public void fillBucket() {
+            Main.sleep(1_000);
+
+            myUsedBuckets++;
+            bucketsSinceLastBreak++;
+
+            usedBucketsMutex.lock();
+            usedBucketsCount++;
+            usedBucketsMutex.unlock();
+        }
+
+        private void takeBreak() {
+            Main.sleep(2_000);
         }
 
         @Override
         public void run() {
-//            voteBoxMutex.lock();
-//            while (myCurrent.currentlyVoting)
-            synchronized (myCurrent) {
-                while (myCurrent.currentlyVoting == 3)
-                    waitForNotify(myCurrent);
+            while(!stop) {
 
-                myCurrent.currentlyVoting++;
-//                System.out.println("MyID: " + myId + "   -- Currently voting: " + myCurrent.currentlyVoting);
+                paint();
+
+                if (stop)
+                    return;
+
+                fillBucket();
+
+                if (bucketsSinceLastBreak == 4) {
+                    bucketsSinceLastBreak = 0;
+
+                    waitForColleagues(3);
+
+                    System.out.println(myId+" --- taking break");
+                    if (stop) return;
+                    takeBreak();
+                    System.out.println(myId+" --- leaving break");
+                }
             }
-
-            vote();
-
-            synchronized (myCurrent) {
-//                System.out.println("MyID: " + myId + "   -- Voted. Submiting vote.");
-                myCurrent.currentlyVoting--;
-                myCurrent.notify();
-            }
-
-            mutex.lock();
-            submitVote();
-//            System.out.println("MyID: " + myId + "   -- I left");
-            mutex.unlock();
         }
 
+        private void waitForColleagues(int numberOfColleaguesOnBreak) {
+            mutex.lock();
+            try {
+                while (inBarrier && !stop)
+                    awaitForSignal(waitingCondition);
+                if (stop) return;
+
+                currentlyWaiting++;
+
+                if (currentlyWaiting == numberOfColleaguesOnBreak) {
+                    inBarrier = true;
+                    waitingCondition.signalAll();
+                }
+                while (!inBarrier && !stop)
+                    awaitForSignal(waitingCondition);
+                if (stop) return;
+
+                currentlyWaiting--;
+
+                if (currentlyWaiting == 0) {
+                    inBarrier = false;
+                    waitingCondition.signalAll();
+                } else {
+                    while (inBarrier && !stop)
+                        awaitForSignal(waitingCondition);
+                    if (stop) return;
+                }
+            } finally {
+                mutex.unlock();
+            }
+        }
+
+        public Integer getMyUsedBuckets() {
+            return myUsedBuckets;
+        }
+
+        public Integer getMyId() {
+            return myId;
+        }
     }
 
 }
