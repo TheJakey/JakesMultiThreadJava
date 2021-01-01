@@ -7,16 +7,20 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
 
-    private static final Current myCurrent = new Current();
-
     private static final ReentrantLock mutex = new ReentrantLock();
-    private static final Condition waitingCondition = mutex.newCondition();
-    private static boolean inBarrier = false;
 
-    private static final ReentrantLock usedBucketsMutex = new ReentrantLock();
-    private static int usedBucketsCount = 0;
-    private volatile static int currentlyWaiting = 0;
+    private static final Condition baronCondition = mutex.newCondition();
+    private static final Condition slaveCondition = mutex.newCondition();
 
+    private static final ReentrantLock baronBowMutex = new ReentrantLock();
+    private static final ReentrantLock slaveBowMutex = new ReentrantLock();
+    private static int baronBowCount = 0;
+    private static int slaveBowCount = 0;
+
+    private static int baronsCount = 0;
+    private static int slavesCount = 0;
+
+    private static int baronsCurrentlyBowing = 0;
 
     private static boolean stop = false;
 
@@ -24,32 +28,36 @@ public class Main {
     public static void main(String[] args) {
         int i;
 
-        List<Thread> painters = new ArrayList<>();
+        List<Thread> barrons = new ArrayList<>();
+        List<Thread> slaves = new ArrayList<>();
 
-        for (i = 0; i < 10; i++) painters.add(new PainterThread(i));
+        for (i = 0; i < 4; i++) barrons.add(new BaronThread(i));
+        for (i = 0; i < 10; i++) slaves.add(new SlaveThread(i));
 
-        for (Thread thread : painters) {
-            thread.start();
-        }
+        startThreads(barrons);
+        startThreads(slaves);
 
         sleep(30_000);
         stop = true;
 
         mutex.lock();
-        waitingCondition.signalAll();
+        baronCondition.signalAll();
+        slaveCondition.signalAll();
         mutex.unlock();
 
         try {
-            for (Thread thread : painters) {
-                System.out.println("Painter " + ((PainterThread)thread).getMyId()
-                                   + " used: " + ((PainterThread)thread).getMyUsedBuckets());
+            for (Thread thread : barrons) {
+                thread.join();
+            }
+            for (Thread thread : slaves) {
                 thread.join();
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
 
-        System.out.println("All used: " + usedBucketsCount);
+        System.out.println("Baron bow: " + baronBowCount);
+        System.out.println("Slave bow: " + slaveBowCount);
     }
 
     public static void sleep(int miliseconds) {
@@ -71,112 +79,121 @@ public class Main {
             e.printStackTrace();
         }
     }
-    private static void waitForNotify(Current queue) {
-        try {
-            queue.wait();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
 
-    static class Current {
-        public int leftForBreak = 0;
-//        public int currentlyWaiting = 0;
-        public boolean needToWaitOthers = true;
-    }
 
-    static class PainterThread extends Thread {
+    static class BaronThread extends Thread {
 
         private final Integer myId;
-        private Integer myUsedBuckets = 0;
-        private Integer bucketsSinceLastBreak = 0;
+        private int countIn = 0;
 
-        public PainterThread(Integer id) {
+        public BaronThread(Integer id) {
             this.myId = id;
         }
 
-        public void paint() {
-            Main.sleep(2_000);
-        }
-
-        public void fillBucket() {
+        public void bow() {
             Main.sleep(1_000);
-
-            myUsedBuckets++;
-            bucketsSinceLastBreak++;
-
-            usedBucketsMutex.lock();
-            usedBucketsCount++;
-            usedBucketsMutex.unlock();
+            baronBowMutex.lock();
+            baronBowCount++;
+            baronBowMutex.unlock();
         }
 
         private void takeBreak() {
-            Main.sleep(2_000);
+            Main.sleep(4_000);
         }
 
         @Override
         public void run() {
             while(!stop) {
 
-                paint();
+                mutex.lock();
+                try {
+                    baronsCount++;
+                    while ((slavesCount != 0 || baronsCurrentlyBowing > 1) && !stop)
+                        awaitForSignal(slaveCondition);
+                    if (stop)
+                        break;
 
-                if (stop)
-                    return;
+                    baronsCurrentlyBowing++;
 
-                fillBucket();
+                    System.out
+                        .println("Klania sa BARON            Dnu ich je: " + baronsCurrentlyBowing);
+                    mutex.unlock();
 
-                if (bucketsSinceLastBreak == 4) {
-                    bucketsSinceLastBreak = 0;
+                    if (stop)
+                        break;
+                    bow();
 
-                    waitForColleagues(3);
+                    System.out.println("Doklanal sa BARON");
 
-                    System.out.println(myId+" --- taking break");
-                    if (stop) return;
-                    takeBreak();
-                    System.out.println(myId+" --- leaving break");
+                    mutex.lock();
+
+                    baronsCurrentlyBowing--;
+                    baronsCount--;
+                    baronCondition.signalAll();
+                    slaveCondition.signalAll();
+                } finally {
+                    mutex.unlock();
                 }
+
+                if (stop) break;
+                System.out.println("BARON ma prestavku ----------- Ostava baronov na zaciatku " + baronsCount + " =========== ostava Baronov DNU: "+ baronsCurrentlyBowing);
+                takeBreak();
             }
         }
 
-        private void waitForColleagues(int numberOfColleaguesOnBreak) {
-            mutex.lock();
-            try {
-                while (inBarrier && !stop)
-                    awaitForSignal(waitingCondition);
-                if (stop) return;
+    }
 
-                currentlyWaiting++;
+    static class SlaveThread extends Thread {
 
-                if (currentlyWaiting == numberOfColleaguesOnBreak) {
-                    inBarrier = true;
-                    waitingCondition.signalAll();
+        private final Integer myId;
+
+        public SlaveThread(Integer id) {
+            this.myId = id;
+        }
+
+        public void bow() {
+            Main.sleep(1_000);
+            slaveBowMutex.lock();
+            slaveBowCount++;
+            slaveBowMutex.unlock();
+        }
+
+        private void takeBreak() {
+            Main.sleep(4_000);
+        }
+
+        @Override
+        public void run() {
+            while(!stop) {
+
+                mutex.lock();
+                try {
+                    while (baronsCount != 0 && !stop)
+                        awaitForSignal(baronCondition);
+                    if (stop)
+                        break;
+
+                    slavesCount++;
+                    mutex.unlock();
+
+                    if (stop)
+                        break;
+                    System.out.println("Klania sa slave");
+                    bow();
+
+                    mutex.lock();
+                    slavesCount--;
+                    slaveCondition.signalAll();
+
+                } finally {
+                    mutex.unlock();
                 }
-                while (!inBarrier && !stop)
-                    awaitForSignal(waitingCondition);
-                if (stop) return;
-
-                currentlyWaiting--;
-
-                if (currentlyWaiting == 0) {
-                    inBarrier = false;
-                    waitingCondition.signalAll();
-                } else {
-                    while (inBarrier && !stop)
-                        awaitForSignal(waitingCondition);
-                    if (stop) return;
-                }
-            } finally {
-                mutex.unlock();
+                if (stop) break;
+                System.out.println("Slave ma prestavku ----------- ");
+                takeBreak();
             }
         }
 
-        public Integer getMyUsedBuckets() {
-            return myUsedBuckets;
-        }
-
-        public Integer getMyId() {
-            return myId;
-        }
     }
 
 }
